@@ -1,0 +1,222 @@
+---
+title: "Homework 4"
+author: "Olivia Quinn"
+date: "4/21/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE,
+                      warning = FALSE)
+```
+
+
+### Loading Packages
+```{r}
+library(tidymodels)
+library(ISLR)
+library(ISLR2)
+library(tidyverse)
+library(readr)
+library(corrr)
+library(discrim)
+library(poissonreg)
+library(klaR)
+tidymodels_prefer()
+```
+
+### Data: Load the data from `data/titanic.csv`
+```{r}
+titanic <- read_csv("titanic.csv")
+
+titanic$survived <- factor(titanic$survived, levels = c('Yes', 'No'))
+titanic$pclass <- factor(titanic$pclass)
+```
+
+### Question 1: Split the Data + HW 3 Recipe
+
+```{r}
+set.seed(24)
+
+titanic_split <- initial_split(titanic, prop = 0.70, strata = survived)
+titanic_train <- training(titanic_split)
+titanic_test <- testing(titanic_split)
+
+titanic_recipe <- recipe(survived ~ pclass + sex + age + sib_sp + parch + 
+                           fare, data = titanic_train) %>% 
+  step_impute_linear(age, impute_with = imp_vars(all_predictors())) %>% 
+  step_dummy(all_nominal_predictors()) %>% 
+  step_interact(terms = ~ fare:starts_with("sex")) %>%
+  step_interact(terms = ~ fare:age)
+
+
+dim(titanic_train)
+dim(titanic_test)
+
+
+```
+
+### Question 2: Fold the **training** data. Use *k*-fold cross-validation, with $k = 10$.
+
+```{r}
+set.seed(24)
+titanic_folds <- vfold_cv(titanic_train, v = 10)
+titanic_folds
+
+```
+
+
+### Question 3: What is *k*-fold cross-validation? And why do we use it?
+
+*k*-fold cross-validation involves randomly dividing the training data into an equal number of observations, to produce *k* groups. We then pass k-1 groups, or "folds", through the selected model and compute the MSE (quantitative outcome) or classification error rate (class outcome) of the kth fold which serves as a mini-validation set. If we did use the entire training set we would be using a validation set approach to resampling. 
+
+### Question 4: 3 Workflows + total models fitted
+
+I will be fitting 30 models total across all folds (3 models x 10 folds).
+
+```{r}
+
+#lOG
+log_reg <- 
+  logistic_reg() %>% 
+  set_engine("glm") %>% 
+  set_mode("classification")
+
+log_wkflow <- 
+  workflow() %>% 
+  add_model(log_reg) %>% 
+  add_recipe(titanic_recipe)
+
+#LDA
+lda_mod <- 
+  discrim_linear() %>% 
+  set_mode("classification") %>% 
+  set_engine("MASS")
+
+lda_wkflow <- 
+  workflow() %>% 
+  add_model(lda_mod) %>% 
+  add_recipe(titanic_recipe)
+
+#QDA
+qda_mod <- 
+  discrim_quad() %>% 
+  set_mode("classification") %>% 
+  set_engine("MASS")
+
+qda_wkflow <- 
+  workflow() %>% 
+  add_model(qda_mod) %>% 
+  add_recipe(titanic_recipe)
+```
+
+
+
+### Question 5: Fit all models to all folds.
+
+```{r, eval = FALSE}
+set.seed(24)
+
+log_fit <- 
+  log_wkflow %>% 
+  fit_resamples(titanic_folds)
+
+lda_fit <- 
+  lda_wkflow %>% 
+  fit_resamples(titanic_folds)
+
+qda_fit <- 
+  qda_wkflow %>% 
+  fit_resamples(titanic_folds)
+
+save(log_fit, lda_fit, qda_fit, file = "foldedfits.rda")
+```
+
+
+### Question 6: Model accuracies + comparison 
+
+The linear discriminant analysis model performed better than the other two, but only marginally. Each model produced an accuracy value of ~0.79 - 0.80 with standard error of ~0.015 - 0.018. The lower bound on the linear discriminant model's accuracy (0.7859) is near the mean accuracy value of the logistic regression model (0.7976), so appears to perform slightly better. 
+
+```{r}
+load(file = "foldedfits.rda")
+
+collect_metrics(log_fit)
+collect_metrics(lda_fit)
+collect_metrics(qda_fit)
+
+```
+
+
+### Question 7: Fit model to full training set
+
+
+```{r}
+lda_full_fit <- fit(lda_wkflow, titanic_train)
+
+```
+
+
+### Question 8: Fit model to test set and compare accuracy to accuracy across folds.
+
+The model's testing accuracy is 0.77, while the model's average accuracy across folds is (as derived above via "lda_fit") 0.80. It appears that the testing accuracy is slightly lower than it was for the training/folded data, but not by much. This is expected given that the testing data set is much smaller in size and completely foreign to the model. 
+
+```{r}
+lda_test_predict <- predict(lda_full_fit, new_data = titanic_test, type = "class")
+
+lda_test_predict <- bind_cols(lda_test_predict, titanic_test %>% select(survived))
+
+accuracy(lda_test_predict, .pred_class, survived)
+
+collect_metrics(lda_fit)
+
+```
+
+
+
+## Required for 231 Students
+
+Consider the following intercept-only model, with $\epsilon \sim N(0, \sigma^2)$:
+
+$$
+Y=\beta+\epsilon
+$$
+
+where $\beta$ is the parameter that we want to estimate. Suppose that we have $n$ observations of the response, i.e. $y_{1}, ..., y_{n}$, with uncorrelated errors.
+
+### Question 9
+
+##### Derive the least-squares estimate of $\beta$.
+
+Given that $\epsilon \sim N(0, \sigma^2)$, we assume that the expectation of the error term is equal to zero ($E(\epsilon) = 0$). 
+
+Under this assumption, $\beta$ is equal to the mean of the responses $(y)$. 
+
+Taking:
+$$
+Y=\beta+\epsilon
+$$
+Assuming:
+$$
+\epsilon \sim N(0, \sigma^2) ... or... E(\epsilon) = 0
+$$
+Gives:
+$$
+\overline{y}=\hat\beta
+$$
+
+
+### Question 10
+
+##### Suppose that we perform leave-one-out cross-validation (LOOCV). Recall that, in LOOCV, we divide the data into $n$ folds. What is the covariance between $\hat{\beta}^{(1)}$, or the least-squares estimator of $\beta$ that we obtain by taking the first fold as a training set, and $\hat{\beta}^{(2)}$, the least-squares estimator of $\beta$ that we obtain by taking the second fold as a training set?
+
+
+Covariance is a measure of linear dependence. The two samples produced via leave-one-out-cross-validation are nearly the same, save for a single observation left out of each fold (n-1). In this case, we expect a highly positive covariance between the sample means. If we had real folded data and exact sample means for each fold, we could compute the following:
+
+$$
+cov(\hat{\beta}^{(1)},\hat{\beta}^{(2)}) = cov(\overline{y}^{(1)},\overline{y}^{(2)})
+$$
+
+$$
+cov(\overline{y}^{(1)},\overline{y}^{(2)}) = \frac{1}{n-1}\sum_{i=1}^{n}(y_i^{(1)} - E[y_i^{(1)}])(y_i^{(2)} - E[y_i^{(2)}]))
+$$
+
